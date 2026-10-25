@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="theme-color" content="#0b0b0f">
+<title>Local Neural TTS</title>
+<style>
+:root{--bg:#f2f2f7;--card:#fff;--text:#111;--muted:#6c6c70;--accent:#0a84ff;--border:#d1d1d6;--ok:#30a14e;--err:#d70015;
+box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#000;--card:#1c1c1e;--text:#f2f2f7;--muted:#8e8e93;--accent:#0a84ff;--border:#38383a;--ok:#32d74b;--err:#ff453a}}
+:root[data-theme="dark"]{--bg:#000;--card:#1c1c1e;--text:#f2f2f7;--muted:#8e8e93;--accent:#0a84ff;--border:#38383a;--ok:#32d74b;--err:#ff453a}
+html{scroll-padding-top:env(safe-area-inset-top,0px);-webkit-text-size-adjust:100%}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+body{margin:0;background:var(--bg);color:var(--text);font:17px/1.4 -apple-system,BlinkMacSystemFont,"SF Pro Text",system-ui,sans-serif;padding:16px;padding-left:max(16px,env(safe-area-inset-left));padding-right:max(16px,env(safe-area-inset-right))}
+main{max-width:430px;margin:0 auto}
+h1{font-size:1.7rem;margin:4px 0 2px;letter-spacing:-.02em}
+.sub{color:var(--muted);font-size:.9rem;margin:0 0 16px}
+.card{background:var(--card);border-radius:14px;padding:14px;margin-bottom:12px}
+label{display:flex;justify-content:space-between;font-size:.85rem;color:var(--muted);margin:12px 0 6px}
+label:first-child{margin-top:0}
+textarea,select{width:100%;font-size:16px;padding:12px;border:1px solid var(--border);border-radius:10px;background:var(--bg);color:var(--text);font-family:inherit;-webkit-appearance:none;appearance:none}
+textarea{min-height:140px;resize:vertical}
+input[type=range]{width:100%;height:32px;accent-color:var(--accent)}
+button{width:100%;min-height:48px;font-size:17px;font-weight:600;border:0;border-radius:12px;background:var(--accent);color:#fff;font-family:inherit;margin-top:10px}
+button.alt{background:transparent;color:var(--accent);border:1px solid var(--border)}
+button:disabled{opacity:.45}
+.row{display:flex;gap:8px}
+progress{width:100%;height:8px;margin-top:10px;display:none}
+#status{font-size:.88rem;color:var(--muted);margin-top:10px;min-height:1.2em;word-break:break-word}
+#status.err{color:var(--err)}#status.ok{color:var(--ok)}
+audio{width:100%;margin-top:12px;display:none}
+a.dl{display:none;text-align:center;margin-top:10px;color:var(--accent);font-size:.95rem}
+.note{font-size:.78rem;color:var(--muted);margin-top:8px}
+</style>
+</head>
+<body>
+<main>
+  <h1>Local Neural TTS</h1>
+  <p class="sub">Supertonic running on-device in Safari. No text leaves your phone.</p>
+
+  <div class="card">
+    <label for="model">Model</label>
+    <select id="model">
+      <option value="onnx-community/Supertonic-TTS-ONNX">Supertonic v1 (English)</option>
+      <option value="onnx-community/Supertonic-TTS-2-ONNX">Supertonic v2 (en, ko, es, pt, fr)</option>
+    </select>
+    <label for="lang" id="langLabel" style="display:none">Language (v2)</label>
+    <select id="lang" style="display:none">
+      <option value="en">English</option><option value="es">Spanish</option>
+      <option value="fr">French</option><option value="pt">Portuguese</option><option value="ko">Korean</option>
+    </select>
+    <button id="load">Download &amp; load model</button>
+    <progress id="prog" max="100" value="0"></progress>
+    <div id="status">Model not loaded. First load downloads the files, then Safari caches them.</div>
+  </div>
+
+  <div class="card">
+    <label for="text">Text</label>
+    <textarea id="text">This is a test of speech generated entirely on this iPhone.</textarea>
+    <label for="voice">Voice</label>
+    <select id="voice">
+      <option>F1</option><option>F2</option><option>F3</option><option>F4</option><option>F5</option>
+      <option>M1</option><option>M2</option><option>M3</option><option>M4</option><option>M5</option>
+    </select>
+    <label for="speed">Speed <span id="sv">1.05</span></label>
+    <input id="speed" type="range" min="0.8" max="1.2" step="0.05" value="1.05">
+    <label for="steps">Quality steps <span id="stv">5</span></label>
+    <input id="steps" type="range" min="1" max="15" step="1" value="5">
+    <button id="gen" disabled>Generate speech</button>
+    <audio id="player" controls playsinline></audio>
+    <a class="dl" id="dl" download="speech.wav">Save WAV</a>
+  </div>
+
+  <button class="alt" id="sys">Speak with iOS system voice instead</button>
+  <p class="note">Higher quality steps sound better but take longer. Pitch control is not part of this model; voice character comes from the selected voice embedding.</p>
+</main>
+
+<script type="module">
+import { pipeline, env } from "https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.8.1";
+
+const $ = id => document.getElementById(id);
+const status = (m, c = "") => { $("status").textContent = m; $("status").className = c; };
+let tts = null, loadedKey = "";
+const VOICE_BASE = m => `https://huggingface.co/${m}/resolve/main/voices/`;
+
+$("speed").oninput = e => $("sv").textContent = (+e.target.value).toFixed(2);
+$("steps").oninput = e => $("stv").textContent = e.target.value;
+$("model").onchange = () => {
+  const v2 = $("model").value.includes("-2-");
+  $("lang").style.display = $("langLabel").style.display = v2 ? "" : "none";
+};
+
+async function build(model, device) {
+  const progress = p => {
+    if (p.status === "progress" && p.total) {
+      $("prog").style.display = "block";
+      $("prog").value = p.progress;
+      status(`Downloading ${p.file.split("/").pop()} ${Math.round(p.progress)}%`);
+    }
+  };
+  return pipeline("text-to-speech", model, { device, progress_callback: progress });
+}
+
+$("load").onclick = async () => {
+  const model = $("model").value;
+  $("load").disabled = true; $("gen").disabled = true;
+  try {
+    const hasGPU = !!navigator.gpu;
+    status(hasGPU ? "Trying WebGPU…" : "WebGPU unavailable, using WASM (slower)…");
+    try {
+      tts = await build(model, hasGPU ? "webgpu" : "wasm");
+    } catch (e) {
+      console.warn(e);
+      status("WebGPU failed, falling back to WASM…");
+      tts = await build(model, "wasm");
+    }
+    loadedKey = model;
+    $("prog").style.display = "none";
+    status("Model ready. Everything runs locally.", "ok");
+    $("gen").disabled = false;
+  } catch (e) {
+    console.error(e);
+    status("Load failed: " + (e.message || e) + ". Safari may have run out of memory; close other tabs and retry.", "err");
+  }
+  $("load").disabled = false;
+};
+
+$("gen").onclick = async () => {
+  if (!tts) return;
+  let text = $("text").value.trim();
+  if (!text) return;
+  if (loadedKey.includes("-2-")) text = `<${$("lang").value}>${text}</${$("lang").value}>`;
+  $("gen").disabled = true;
+  status("Generating…");
+  try {
+    const t0 = performance.now();
+    const audio = await tts(text, {
+      speaker_embeddings: VOICE_BASE(loadedKey) + $("voice").value + ".bin",
+      num_inference_steps: +$("steps").value,
+      speed: +$("speed").value,
+    });
+    const blob = audio.toBlob();
+    const url = URL.createObjectURL(blob);
+    const p = $("player");
+    p.src = url; p.style.display = "block";
+    $("dl").href = url; $("dl").style.display = "block";
+    status(`Done in ${((performance.now() - t0) / 1000).toFixed(1)}s`, "ok");
+    // iOS may block autoplay after a long await; the controls remain available
+    p.play().catch(() => status("Done. Tap play on the player below.", "ok"));
+  } catch (e) {
+    console.error(e);
+    status("Generation failed: " + (e.message || e), "err");
+  }
+  $("gen").disabled = false;
+};
+
+// System voice fallback
+$("sys").onclick = () => {
+  if (!window.speechSynthesis) return status("System speech not supported.", "err");
+  speechSynthesis.cancel();
+  const u = new SpeechSynthesisUtterance($("text").value);
+  u.rate = Math.min(+$("speed").value, 1.2);
+  speechSynthesis.speak(u);
+};
+</script>
+</body>
+</html>
