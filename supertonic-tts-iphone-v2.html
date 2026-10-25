@@ -1,0 +1,271 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<title>Local Neural TTS</title>
+<style>
+:root{--bg:#f2f2f7;--card:#fff;--text:#111;--muted:#6c6c70;--accent:#0a84ff;--border:#d1d1d6;--ok:#30a14e;--err:#d70015;
+box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#000;--card:#1c1c1e;--text:#f2f2f7;--muted:#8e8e93;--border:#38383a;--ok:#32d74b;--err:#ff453a}}
+:root[data-theme="dark"]{--bg:#000;--card:#1c1c1e;--text:#f2f2f7;--muted:#8e8e93;--border:#38383a;--ok:#32d74b;--err:#ff453a}
+html{scroll-padding-top:env(safe-area-inset-top,0px);-webkit-text-size-adjust:100%}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+body{margin:0;background:var(--bg);color:var(--text);font:17px/1.4 -apple-system,BlinkMacSystemFont,"SF Pro Text",system-ui,sans-serif;padding:16px max(16px,env(safe-area-inset-right)) 16px max(16px,env(safe-area-inset-left))}
+main{max-width:430px;margin:0 auto}
+h1{font-size:1.7rem;margin:4px 0 2px;letter-spacing:-.02em}
+.sub{color:var(--muted);font-size:.9rem;margin:0 0 16px}
+.card{background:var(--card);border-radius:14px;padding:14px;margin-bottom:12px}
+label{display:flex;justify-content:space-between;font-size:.85rem;color:var(--muted);margin:12px 0 6px}
+label:first-child{margin-top:0}
+textarea,select{width:100%;font-size:16px;padding:12px;border:1px solid var(--border);border-radius:10px;background:var(--bg);color:var(--text);font-family:inherit;-webkit-appearance:none;appearance:none}
+textarea{min-height:130px;resize:vertical}
+input[type=range]{width:100%;height:32px;accent-color:var(--accent)}
+button,.btn{display:flex;align-items:center;justify-content:center;width:100%;min-height:48px;font-size:17px;font-weight:600;border:0;border-radius:12px;background:var(--accent);color:#fff;font-family:inherit;margin-top:10px}
+button.alt,.btn.alt{background:transparent;color:var(--accent);border:1px solid var(--border)}
+button:disabled{opacity:.45}
+.row{display:flex;gap:8px}.row>*{flex:1}
+progress{width:100%;height:8px;margin-top:10px;display:none}
+#status{font-size:.88rem;color:var(--muted);margin-top:10px;min-height:1.2em;word-break:break-word}
+#status.err{color:var(--err)}#status.ok{color:var(--ok)}
+audio{width:100%;margin-top:12px;display:none}
+a.dl{display:none;text-align:center;margin-top:10px;color:var(--accent);font-size:.95rem}
+.note{font-size:.78rem;color:var(--muted);margin-top:8px}
+#imp{display:none}
+</style>
+</head>
+<body>
+<main>
+  <h1>Local Neural TTS</h1>
+  <p class="sub">Supertonic running on-device in Safari. No text leaves your phone.</p>
+
+  <div class="card">
+    <label for="model">Model</label>
+    <select id="model">
+      <option value="onnx-community/Supertonic-TTS-ONNX">Supertonic v1 (English)</option>
+      <option value="onnx-community/Supertonic-TTS-2-ONNX">Supertonic v2 (en, ko, es, pt, fr)</option>
+    </select>
+    <label for="lang" id="langLabel" style="display:none">Language (v2)</label>
+    <select id="lang" style="display:none">
+      <option value="en">English</option><option value="es">Spanish</option>
+      <option value="fr">French</option><option value="pt">Portuguese</option><option value="ko">Korean</option>
+    </select>
+    <label for="conc">Download mode</label>
+    <select id="conc">
+      <option value="1">One file at a time</option>
+      <option value="3">All files at once (can be faster)</option>
+    </select>
+    <button id="load">Download model</button>
+    <div class="row">
+      <button class="alt" id="exp" disabled>Export to device</button>
+      <label class="btn alt" for="imp" style="margin-bottom:0">Import file</label>
+    </div>
+    <input id="imp" type="file">
+    <progress id="prog" max="100" value="0"></progress>
+    <div id="status">No model yet. Download it once, export it, then import the file next time to skip the download.</div>
+  </div>
+
+  <div class="card">
+    <label for="text">Text</label>
+    <textarea id="text">This is a test of speech generated entirely on this iPhone.</textarea>
+    <label for="voice">Voice</label>
+    <select id="voice">
+      <option>F1</option><option>F2</option><option>F3</option><option>F4</option><option>F5</option>
+      <option>M1</option><option>M2</option><option>M3</option><option>M4</option><option>M5</option>
+    </select>
+    <label for="speed">Speed <span id="sv">1.05</span></label>
+    <input id="speed" type="range" min="0.8" max="1.2" step="0.05" value="1.05">
+    <label for="steps">Quality steps <span id="stv">5</span></label>
+    <input id="steps" type="range" min="1" max="15" step="1" value="5">
+    <button id="gen" disabled>Generate speech</button>
+    <audio id="player" controls playsinline></audio>
+    <a class="dl" id="dl" download="speech.wav">Save WAV</a>
+  </div>
+
+  <button class="alt" id="sys">Speak with iOS system voice instead</button>
+  <p class="note">The speech runtime (a small WASM engine) still loads from a CDN each visit and can’t be exported. The model files are the large part.</p>
+</main>
+
+<script type="module">
+import { pipeline, env } from "https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.8.1";
+
+const $ = id => document.getElementById(id);
+const status = (m, c = "") => { $("status").textContent = m; $("status").className = c; };
+const mb = n => (n / 1048576).toFixed(n > 1e8 ? 0 : 1);
+
+/* ---------- in-memory file store (Blobs) used as Transformers.js cache ---------- */
+const store = new Map(); // model -> Map(path -> Blob)
+const bucket = m => store.get(m) || store.set(m, new Map()).get(m);
+const KEY = /huggingface\.co\/([^/]+\/[^/]+)\/resolve\/[^/]+\/([^?]+)/;
+const keyOf = r => KEY.exec(typeof r === "string" ? r : r.url);
+
+env.useBrowserCache = false;
+env.useCustomCache = true;
+env.customCache = {
+  async match(req) {
+    const m = keyOf(req);
+    const b = m && store.get(m[1])?.get(decodeURIComponent(m[2]));
+    return b ? new Response(b, { status: 200, headers: { "Content-Type": "application/octet-stream", "Content-Length": String(b.size) } }) : undefined;
+  },
+  async put(req, res) {
+    const m = keyOf(req);
+    if (m) bucket(m[1]).set(decodeURIComponent(m[2]), await res.clone().blob());
+  },
+};
+
+let tts = null, loadedModel = "", lock = null;
+const model = () => $("model").value;
+
+function refreshInfo() {
+  const b = store.get(model());
+  const size = b ? [...b.values()].reduce((s, x) => s + x.size, 0) : 0;
+  $("exp").disabled = !size;
+  return size;
+}
+
+/* ---------- file listing + downloader with ONE combined progress bar ---------- */
+async function listFiles(m) {
+  const r = await fetch(`https://huggingface.co/api/models/${m}/tree/main?recursive=true`);
+  if (!r.ok) throw new Error("Could not list model files (HTTP " + r.status + ")");
+  const items = await r.json();
+  return items.filter(i => i.type === "file" && (
+      /^onnx\/(text_encoder|latent_denoiser|voice_decoder)\.onnx(_data)?$/.test(i.path) ||
+      (!i.path.startsWith("onnx/") && /\.(json|bin|txt|model)$/.test(i.path))))
+    .map(i => ({ path: i.path, size: (i.lfs && i.lfs.size) || i.size }));
+}
+
+async function downloadAll(m) {
+  status("Checking files…");
+  const files = await listFiles(m);
+  const have = bucket(m);
+  const total = files.reduce((s, f) => s + f.size, 0);
+  let loaded = files.filter(f => have.has(f.path)).reduce((s, f) => s + f.size, 0);
+  const queue = files.filter(f => !have.has(f.path)).sort((a, b) => b.size - a.size);
+  if (!queue.length) return;
+
+  const t0 = performance.now(), base = loaded;
+  let lastT = t0, lastB = loaded, speed = 0;
+  $("prog").style.display = "block"; $("prog").max = total;
+  const timer = setInterval(() => {
+    const now = performance.now(), inst = (loaded - lastB) / ((now - lastT) / 1000);
+    speed = speed ? speed * 0.7 + inst * 0.3 : inst; lastT = now; lastB = loaded;
+    const eta = speed > 0 ? Math.round((total - loaded) / speed) : 0;
+    $("prog").value = loaded;
+    status(`${mb(loaded)} / ${mb(total)} MB · ${(speed / 1048576).toFixed(1)} MB/s · ~${eta}s left`);
+  }, 400);
+
+  async function one(f) {
+    const res = await fetch(`https://huggingface.co/${m}/resolve/main/${f.path}`);
+    if (!res.ok) throw new Error(f.path + ": HTTP " + res.status);
+    const rd = res.body.getReader(), chunks = []; let got = 0;
+    for (;;) { const { done, value } = await rd.read(); if (done) break; chunks.push(value); got += value.length; loaded += value.length; }
+    have.set(f.path, new Blob(chunks));
+  }
+  try {
+    await Promise.all(Array.from({ length: Math.min(+$("conc").value, queue.length) }, async () => {
+      while (queue.length) await one(queue.shift());
+    }));
+  } finally { clearInterval(timer); }
+}
+
+/* ---------- build the pipeline from the store ---------- */
+async function initPipeline(m) {
+  status("Starting model…");
+  try {
+    tts = await pipeline("text-to-speech", m, { device: navigator.gpu ? "webgpu" : "wasm" });
+  } catch (e) {
+    console.warn(e); status("WebGPU failed, trying WASM…");
+    tts = await pipeline("text-to-speech", m, { device: "wasm" });
+  }
+  loadedModel = m;
+  $("prog").style.display = "none";
+  status("Model ready. Everything runs locally.", "ok");
+  $("gen").disabled = false;
+  refreshInfo();
+}
+
+async function run(fn) {
+  ["load", "gen"].forEach(i => $(i).disabled = true);
+  try { lock = await navigator.wakeLock?.request("screen"); } catch {}
+  try { await fn(); }
+  catch (e) { console.error(e); $("prog").style.display = "none"; status("Failed: " + (e.message || e) + " (if memory-related, close other tabs and retry)", "err"); }
+  try { await lock?.release(); } catch {}
+  $("load").disabled = false; refreshInfo();
+  $("gen").disabled = !tts;
+}
+
+$("load").onclick = () => run(async () => { await downloadAll(model()); await initPipeline(model()); });
+
+/* ---------- export / import ---------- */
+$("exp").onclick = async () => {
+  const m = model(), b = store.get(m);
+  if (!b || !b.size) return;
+  const files = [...b.entries()];
+  const head = new TextEncoder().encode(JSON.stringify({ v: 1, model: m, files: files.map(([path, bl]) => ({ path, size: bl.size })) }));
+  const len = new Uint8Array(4); new DataView(len.buffer).setUint32(0, head.length, true);
+  const blob = new Blob([len, head, ...files.map(f => f[1])]);
+  const name = m.split("/")[1] + ".stts";
+  const file = new File([blob], name, { type: "application/octet-stream" });
+  if (navigator.canShare && navigator.canShare({ files: [file] })) {
+    try { await navigator.share({ files: [file], title: name }); status("Exported. Choose “Save to Files” in the share sheet.", "ok"); return; }
+    catch (e) { if (e.name === "AbortError") return; }
+  }
+  const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = name; a.click();
+  status("Export started. Check your Downloads folder.", "ok");
+};
+
+$("imp").onchange = e => {
+  const f = e.target.files[0]; e.target.value = "";
+  if (!f) return;
+  run(async () => {
+    status("Reading file…");
+    const n = new DataView(await f.slice(0, 4).arrayBuffer()).getUint32(0, true);
+    const h = JSON.parse(new TextDecoder().decode(await f.slice(4, 4 + n).arrayBuffer()));
+    if (!h.model || !h.files) throw new Error("Not a valid .stts model file");
+    const b = bucket(h.model); let off = 4 + n;
+    for (const x of h.files) { b.set(x.path, f.slice(off, off + x.size)); off += x.size; }
+    if (![...$("model").options].some(o => o.value === h.model)) throw new Error("Unknown model: " + h.model);
+    $("model").value = h.model; $("model").dispatchEvent(new Event("change"));
+    await initPipeline(h.model);
+  });
+};
+
+/* ---------- UI + generation ---------- */
+$("speed").oninput = e => $("sv").textContent = (+e.target.value).toFixed(2);
+$("steps").oninput = e => $("stv").textContent = e.target.value;
+$("model").onchange = () => {
+  $("lang").style.display = $("langLabel").style.display = model().includes("-2-") ? "" : "none";
+  refreshInfo();
+};
+
+$("gen").onclick = async () => {
+  if (!tts) return;
+  let text = $("text").value.trim();
+  if (!text) return;
+  if (loadedModel.includes("-2-")) text = `<${$("lang").value}>${text}</${$("lang").value}>`;
+  $("gen").disabled = true; status("Generating…");
+  try {
+    const t0 = performance.now();
+    const vb = store.get(loadedModel)?.get(`voices/${$("voice").value}.bin`);
+    const speaker = vb ? URL.createObjectURL(vb) : `https://huggingface.co/${loadedModel}/resolve/main/voices/${$("voice").value}.bin`;
+    const audio = await tts(text, { speaker_embeddings: speaker, num_inference_steps: +$("steps").value, speed: +$("speed").value });
+    const url = URL.createObjectURL(audio.toBlob());
+    const p = $("player"); p.src = url; p.style.display = "block";
+    $("dl").href = url; $("dl").style.display = "block";
+    status(`Done in ${((performance.now() - t0) / 1000).toFixed(1)}s`, "ok");
+    p.play().catch(() => status("Done. Tap play on the player below.", "ok"));
+  } catch (e) { console.error(e); status("Generation failed: " + (e.message || e), "err"); }
+  $("gen").disabled = false;
+};
+
+$("sys").onclick = () => {
+  if (!window.speechSynthesis) return status("System speech not supported.", "err");
+  speechSynthesis.cancel();
+  const u = new SpeechSynthesisUtterance($("text").value);
+  u.rate = Math.min(+$("speed").value, 1.2);
+  speechSynthesis.speak(u);
+};
+</script>
+</body>
+</html>
